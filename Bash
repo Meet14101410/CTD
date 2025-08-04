@@ -1,0 +1,90 @@
+#!/bin/bash
+
+# This script simulates organizing loose CTD files into a structured directory.
+# In a real system, the files would be managed by an eTMF or DMS directly,
+# but this shows the principle of file organization.
+
+# --- Configuration ---
+SOURCE_DIR="/tmp/ctd_incoming"        # Where new/unorganized CTD files land
+TARGET_ROOT_DIR="/var/clinical_data_repo" # Root for organized CTDs
+LOG_FILE="/var/log/ctd_organizer.log"
+
+# --- Functions ---
+
+log_message() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+# Simulates metadata lookup (in real life, query a database)
+# Returns "TrialID:SiteID:DocType:TMFZone:TMFSection:TMFArtifact" or empty string if not found
+get_ctd_metadata() {
+    local filename=$1
+    # Very simplified: parse from filename or a hardcoded lookup
+    if [[ "$filename" == "Protocol_v1.0_TRIAL001.pdf" ]]; then
+        echo "TRIAL-001::Protocol:01:01.01:01.01.01" # No site_id
+    elif [[ "$filename" == "ICF_SITE002_P01_v1.1.pdf" ]]; then
+        echo "TRIAL-001:SITE-002:ICF:04:04.01:04.01.01"
+    elif [[ "$filename" == "CV_INV_DrBrown_TRIAL003.pdf" ]]; then
+        echo "TRIAL-003:SITE-005:Investigator_CV:05:05.02:05.02.01"
+    else
+        echo "" # Metadata not found
+    fi
+}
+
+process_ctd_file() {
+    local filepath=$1
+    local filename=$(basename "$filepath")
+    local metadata=$(get_ctd_metadata "$filename")
+
+    if [ -z "$metadata" ]; then
+        log_message "WARNING: No metadata found for $filename. Skipping."
+        return 1
+    fi
+
+    IFS=':' read -r trial_id site_id doc_type tmf_zone tmf_section tmf_artifact <<< "$metadata"
+
+    local target_dir=""
+    if [ -n "$site_id" ]; then
+        target_dir="${TARGET_ROOT_DIR}/${trial_id}/sites/${site_id}/${tmf_zone}_${tmf_section}_${doc_type}"
+    else
+        target_dir="${TARGET_ROOT_DIR}/${trial_id}/central/${tmf_zone}_${tmf_section}_${doc_type}"
+    fi
+
+    mkdir -p "$target_dir"
+    if [ $? -ne 0 ]; then
+        log_message "ERROR: Failed to create target directory: $target_dir"
+        return 1
+    fi
+
+    log_message "Moving '$filename' to '$target_dir'"
+    mv "$filepath" "$target_dir/"
+
+    if [ $? -eq 0 ]; then
+        log_message "SUCCESS: '$filename' moved and organized."
+        # Optionally, update database record here (not in bash, but as a conceptual step)
+    else
+        log_message "FAILURE: Failed to move '$filename'."
+    fi
+}
+
+# --- Main Script Logic ---
+
+log_message "--- Starting CTD File Organizer ---"
+
+# Create dummy source directory and files for testing
+mkdir -p "$SOURCE_DIR"
+echo "Dummy Protocol" > "${SOURCE_DIR}/Protocol_v1.0_TRIAL001.pdf"
+echo "Dummy ICF" > "${SOURCE_DIR}/ICF_SITE002_P01_v1.1.pdf"
+echo "Dummy CV" > "${SOURCE_DIR}/CV_INV_DrBrown_TRIAL003.pdf"
+echo "Unknown_Document.txt" > "${SOURCE_DIR}/Unknown_Document.txt"
+
+# Iterate over files in the source directory
+for file in "$SOURCE_DIR"/*; do
+    if [ -f "$file" ]; then
+        process_ctd_file "$file"
+    fi
+done
+
+log_message "--- CTD File Organizer Finished ---"
+echo "Check $LOG_FILE for details."
+echo "Organized files can be found in: $TARGET_ROOT_DIR"
