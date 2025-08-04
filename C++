@@ -1,0 +1,185 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <map>
+#include <memory> // For std::shared_ptr
+#include <chrono> // For high-resolution timestamps
+#include <iomanip> // For std::put_time
+#include <ctime>   // For std::localtime, std::mktime
+
+// Forward declaration
+struct CTDMetadata;
+
+// Helper to generate a unique ID (simplified UUID)
+std::string generate_ctd_uuid() {
+    auto now = std::chrono::system_clock::now();
+    long long timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+    return "CTD-" + std::to_string(timestamp) + "-" + std::to_string(rand() % 10000); // Add random part
+}
+
+// Enum for Document Type
+enum class DocumentType {
+    Protocol, ICF, CRF, IB, MonitoringReport, RegulatorySubmission, Other
+};
+
+// Map to convert enum to string (for printing)
+const std::map<DocumentType, std::string> DocTypeToString = {
+    {DocumentType::Protocol, "Protocol"},
+    {DocumentType::ICF, "ICF"},
+    {DocumentType::CRF, "CRF"},
+    {DocumentType::IB, "Investigator's Brochure"},
+    {DocumentType::MonitoringReport, "Monitoring Report"},
+    {DocumentType::RegulatorySubmission, "Regulatory Submission"},
+    {DocumentType::Other, "Other"}
+};
+
+// Represents the immutable core metadata of a CTD version
+struct CTDMetadata {
+    std::string documentId;          // Unique ID for the document instance/version
+    std::string masterDocumentId;    // ID for the document series (e.g., Protocol, Protocol v1.0, v1.1 all share this)
+    std::string trialId;
+    std::string siteId;              // Can be empty
+    DocumentType docType;
+    std::string title;
+    std::string version;             // e.g., "1.0", "1.1", "2.0"
+    std::string filePath;            // Path to the actual file
+    std::string contentHash;         // SHA256 hash of the file content
+    std::chrono::system_clock::time_point creationTimestamp;
+    std::string author;
+
+    CTDMetadata(const std::string& master_id, const std::string& trial_id, const std::string& site_id,
+                DocumentType type, const std::string& doc_title, const std::string& ver,
+                const std::string& file_path, const std::string& content_hash_val, const std::string& auth)
+        : documentId(generate_ctd_uuid()), masterDocumentId(master_id), trialId(trial_id),
+          siteId(site_id), docType(type), title(doc_title), version(ver),
+          filePath(file_path), contentHash(content_hash_val),
+          creationTimestamp(std::chrono::system_clock::now()), author(auth) {}
+
+    void print() const {
+        std::time_t tt = std::chrono::system_clock::to_time_t(creationTimestamp);
+        std::tm tm = *std::localtime(&tt);
+        std::cout << "  Doc ID: " << documentId
+                  << "\n  Master ID: " << masterDocumentId
+                  << "\n  Trial/Site: " << trialId << (siteId.empty() ? "" : "/" + siteId)
+                  << "\n  Type: " << DocTypeToString.at(docType)
+                  << ", Title: " << title
+                  << ", Version: " << version
+                  << "\n  Path: " << filePath
+                  << "\n  Hash: " << contentHash.substr(0, 16) << "..."
+                  << "\n  Created: " << std::put_time(&tm, "%Y-%m-%d %H:%M:%S")
+                  << ", Author: " << author << "\n";
+    }
+};
+
+// Manages CTD metadata for fast lookup (in-memory, high-performance context)
+class CTDRegistry {
+public:
+    // Using a map for efficient O(log N) lookup by documentId
+    std::map<std::string, std::shared_ptr<CTDMetadata>> latest_documents;
+    // To store all versions for a full audit trail (conceptual)
+    std::vector<std::shared_ptr<CTDMetadata>> historical_versions;
+
+    CTDRegistry() {
+        std::cout << "CTDRegistry initialized for high-performance metadata lookup.\n";
+    }
+
+    // Add a new CTD or a new version of an existing CTD
+    void addOrUpdateCTD(const std::string& master_doc_id, const std::string& trial_id, const std::string& site_id,
+                        DocumentType type, const std::string& title, const std::string& version,
+                        const std::string& file_path, const std::string& content_hash_val, const std::string& author) {
+        
+        // In a real system, you'd load existing document to determine next version
+        // For simplicity, we just add a new CTDMetadata object for each call.
+        std::shared_ptr<CTDMetadata> new_ctd = std::make_shared<CTDMetadata>(
+            master_doc_id, trial_id, site_id, type, title, version, file_path, content_hash_val, author
+        );
+
+        latest_documents[master_doc_id] = new_ctd; // Always points to the latest version
+        historical_versions.push_back(new_ctd);    // Keep all versions for audit
+
+        std::cout << "Registered CTD: " << new_ctd->title << " (v" << new_ctd->version << ")\n";
+    }
+
+    // High-performance lookup of the latest version of a CTD by its master ID
+    std::shared_ptr<CTDMetadata> getLatestCTD(const std::string& master_doc_id) const {
+        auto it = latest_documents.find(master_doc_id);
+        if (it != latest_documents.end()) {
+            return it->second;
+        }
+        return nullptr; // Not found
+    }
+
+    // Search by Trial ID (less efficient for large data without proper indexing, but demonstrates concept)
+    std::vector<std::shared_ptr<CTDMetadata>> getCTDsByTrial(const std::string& trial_id) const {
+        std::vector<std::shared_ptr<CTDMetadata>> result;
+        for (const auto& pair : latest_documents) {
+            if (pair.second->trialId == trial_id) {
+                result.push_back(pair.second);
+            }
+        }
+        return result;
+    }
+
+    // Mock hash function (similar to the one in the eTMF example, for consistency)
+    std::string mock_sha256_hash_content(const std::string& data) const {
+        std::mt19937_64 rng(std::hash<std::string>{}(data));
+        std::stringstream ss;
+        ss << std::hex << std::setw(64) << std::setfill('0') << rng();
+        return ss.str();
+    }
+};
+
+int main() {
+    // Seed random for mock hashes
+    std::srand(static_cast<unsigned int>(std::time(nullptr)));
+
+    CTDRegistry registry;
+
+    // Simulate adding documents
+    std::string protocolMasterId = "MASTER-PROTO-001";
+    registry.addOrUpdateCTD(
+        protocolMasterId, "TRIAL-X", "", DocumentType::Protocol,
+        "Phase 1 Protocol Drug A", "1.0", "/files/proto_v1.pdf",
+        registry.mock_sha256_hash_content("Protocol content version 1"), "user_dev"
+    );
+
+    std::string icfMasterId = "MASTER-ICF-001";
+    registry.addOrUpdateCTD(
+        icfMasterId, "TRIAL-X", "SITE-001", DocumentType::ICF,
+        "ICF Site 001 Drug A", "1.0", "/files/icf_site001_v1.pdf",
+        registry.mock_sha256_hash_content("ICF site 001 content version 1"), "site_coord"
+    );
+
+    // Simulate an amendment (new version of protocol)
+    std::cout << "\n--- Adding Protocol Amendment ---\n";
+    registry.addOrUpdateCTD(
+        protocolMasterId, "TRIAL-X", "", DocumentType::Protocol,
+        "Phase 1 Protocol Drug A (Amended)", "1.1", "/files/proto_v1_1_amend.pdf",
+        registry.mock_sha256_hash_content("Protocol content version 1.1 with amendment details"), "user_dev"
+    );
+
+    // Lookup documents
+    std::cout << "\n--- Latest Documents Lookup ---\n";
+    if (auto latest_protocol = registry.getLatestCTD(protocolMasterId)) {
+        std::cout << "Latest Protocol:\n";
+        latest_protocol->print();
+    }
+
+    if (auto latest_icf = registry.getLatestCTD(icfMasterId)) {
+        std::cout << "\nLatest ICF:\n";
+        latest_icf->print();
+    }
+
+    std::cout << "\n--- Documents for TRIAL-X ---\n";
+    auto trialXDocs = registry.getCTDsByTrial("TRIAL-X");
+    for (const auto& doc : trialXDocs) {
+        doc->print();
+    }
+
+    std::cout << "\n--- Historical Versions (Conceptual Audit) ---\n";
+    for (const auto& doc : registry.historical_versions) {
+        doc->print();
+    }
+
+    return 0;
+}
