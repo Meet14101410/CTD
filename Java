@@ -1,0 +1,314 @@
+// ClinicalTrialDocument.java
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Objects;
+import java.util.UUID;
+
+public class ClinicalTrialDocument {
+
+    private String documentId;
+    private String trialId;
+    private String siteId; // Nullable
+    private DocumentType documentType;
+    private String tmfZoneCode; // e.g., "01" for Management
+    private String tmfSectionCode; // e.g., "01.01" for Protocol
+    private String tmfArtifactCode; // e.g., "01.01.01" for Protocol (Main)
+    private String title;
+    private String version; // e.g., "1.0", "2.1"
+    private DocumentStatus status;
+    private String author;
+    private LocalDate approvalDate; // Effective date or date of formal approval
+    private String filePath; // URL or internal storage path
+    private String contentHash; // SHA256 hash for integrity
+    private LocalDateTime createdDate;
+    private LocalDateTime lastModifiedDate;
+
+    // Constructor for creating a new document (initial state)
+    public ClinicalTrialDocument(String trialId, String siteId, DocumentType documentType,
+                                 String tmfZoneCode, String tmfSectionCode, String tmfArtifactCode,
+                                 String title, String author, String filePath) {
+        this.documentId = UUID.randomUUID().toString();
+        this.trialId = trialId;
+        this.siteId = siteId;
+        this.documentType = documentType;
+        this.tmfZoneCode = tmfZoneCode;
+        this.tmfSectionCode = tmfSectionCode;
+        this.tmfArtifactCode = tmfArtifactCode;
+        this.title = title;
+        this.version = "1.0"; // Always start with 1.0
+        this.status = DocumentStatus.DRAFT; // Default to Draft
+        this.author = author;
+        this.filePath = filePath;
+        this.contentHash = ""; // To be calculated after file upload
+        this.createdDate = LocalDateTime.now();
+        this.lastModifiedDate = LocalDateTime.now();
+    }
+
+    // --- Getters ---
+    public String getDocumentId() { return documentId; }
+    public String getTrialId() { return trialId; }
+    public String getSiteId() { return siteId; }
+    public DocumentType getDocumentType() { return documentType; }
+    public String getTmfZoneCode() { return tmfZoneCode; }
+    public String getTmfSectionCode() { return tmfSectionCode; }
+    public String getTmfArtifactCode() { return tmfArtifactCode; }
+    public String getTitle() { return title; }
+    public String getVersion() { return version; }
+    public DocumentStatus getStatus() { return status; }
+    public String getAuthor() { return author; }
+    public LocalDate getApprovalDate() { return approvalDate; }
+    public String getFilePath() { return filePath; }
+    public String getContentHash() { return contentHash; }
+    public LocalDateTime getCreatedDate() { return createdDate; }
+    public LocalDateTime getLastModifiedDate() { return lastModifiedDate; }
+
+    // --- Setters for Lifecycle/Updates ---
+    // Note: In a real system, these would likely trigger audit log entries
+    public void setVersion(String version) {
+        this.version = version;
+        this.lastModifiedDate = LocalDateTime.now();
+    }
+
+    public void setStatus(DocumentStatus status) {
+        // Add business logic for status transitions if needed (e.g., cannot go from Approved to Draft)
+        this.status = status;
+        this.lastModifiedDate = LocalDateTime.now();
+    }
+
+    public void setApprovalDate(LocalDate approvalDate) {
+        this.approvalDate = approvalDate;
+        this.lastModifiedDate = LocalDateTime.now();
+    }
+
+    public void setFilePath(String filePath) {
+        this.filePath = filePath;
+        this.lastModifiedDate = LocalDateTime.now();
+    }
+
+    public void setContentHash(String contentHash) {
+        this.contentHash = contentHash;
+        // This doesn't necessarily change lastModifiedDate unless content itself changed
+    }
+
+    // Utility method for display
+    public String getTMFClassification() {
+        return String.format("%s.%s.%s", tmfZoneCode, tmfSectionCode, tmfArtifactCode);
+    }
+
+    @Override
+    public String toString() {
+        return "ClinicalTrialDocument{" +
+               "id='" + documentId.substring(0, 8) + "...'" +
+               ", trial='" + trialId + '\'' +
+               ", type=" + documentType +
+               ", title='" + title + '\'' +
+               ", version='" + version + '\'' +
+               ", status=" + status +
+               ", TMF='" + getTMFClassification() + '\'' +
+               ", author='" + author + '\'' +
+               ", approved=" + approvalDate +
+               ", path='" + filePath + '\'' +
+               '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ClinicalTrialDocument that = (ClinicalTrialDocument) o;
+        return Objects.equals(documentId, that.documentId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(documentId);
+    }
+}
+
+// Enum for DocumentType (simplified)
+enum DocumentType {
+    PROTOCOL, ICF, CRF, IB, MONITORING_REPORT, REGULATORY_SUBMISSION, ESSENTIAL_DOC, OTHER
+}
+
+// Enum for DocumentStatus (simplified)
+enum DocumentStatus {
+    DRAFT, PENDING_REVIEW, PENDING_APPROVAL, APPROVED, ACTIVE, SUPERSEDED, ARCHIVED, WITHDRAWN
+}
+
+// CTDManager.java (Manages CTD objects - in-memory for demo)
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import javax.xml.bind.DatatypeConverter; // Requires JAXB (Java 8 or add dependency)
+
+public class CTDManager {
+    private Map<String, ClinicalTrialDocument> documents; // Stores latest version of each document by ID
+
+    public CTDManager() {
+        this.documents = new HashMap<>();
+    }
+
+    public void addDocument(ClinicalTrialDocument doc) {
+        if (documents.containsKey(doc.getDocumentId())) {
+            System.out.println("Error: Document with ID " + doc.getDocumentId() + " already exists. Use updateDocument.");
+            return;
+        }
+        documents.put(doc.getDocumentId(), doc);
+        System.out.println("Added CTD: " + doc.getTitle());
+    }
+
+    // Simulate updating a document (e.g., new version, status change)
+    public Optional<ClinicalTrialDocument> updateDocumentStatus(String docId, DocumentStatus newStatus) {
+        return Optional.ofNullable(documents.get(docId))
+            .map(doc -> {
+                doc.setStatus(newStatus);
+                System.out.println("Updated status of '" + doc.getTitle() + "' to " + newStatus);
+                return doc;
+            });
+    }
+
+    public Optional<ClinicalTrialDocument> updateDocumentVersion(String docId, String newVersion, String newFilePath, String newContentHash) {
+        return Optional.ofNullable(documents.get(docId))
+            .map(doc -> {
+                doc.setVersion(newVersion);
+                doc.setFilePath(newFilePath);
+                doc.setContentHash(newContentHash);
+                doc.setStatus(DocumentStatus.ACTIVE); // Or other appropriate status for new version
+                System.out.println("Updated version of '" + doc.getTitle() + "' to " + newVersion);
+                return doc;
+            });
+    }
+
+    public Optional<ClinicalTrialDocument> getDocumentById(String docId) {
+        return Optional.ofNullable(documents.get(docId));
+    }
+
+    public List<ClinicalTrialDocument> getDocumentsByTrial(String trialId) {
+        List<ClinicalTrialDocument> result = new ArrayList<>();
+        for (ClinicalTrialDocument doc : documents.values()) {
+            if (doc.getTrialId().equals(trialId)) {
+                result.add(doc);
+            }
+        }
+        return result;
+    }
+
+    public List<ClinicalTrialDocument> getDocumentsByType(DocumentType type) {
+        List<ClinicalTrialDocument> result = new ArrayList<>();
+        for (ClinicalTrialDocument doc : documents.values()) {
+            if (doc.getDocumentType() == type) {
+                result.add(doc);
+            }
+        }
+        return result;
+    }
+
+    public List<ClinicalTrialDocument> getAllDocuments() {
+        return new ArrayList<>(documents.values());
+    }
+
+    // Helper for generating content hash (for integrity)
+    // Needs a dummy file created for testing
+    public String calculateFileSha256(String filePath) throws NoSuchAlgorithmException, IOException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        File file = new File(filePath);
+        if (!file.exists()) {
+            return "FILE_NOT_FOUND"; // Or throw exception
+        }
+        try (InputStream fis = new FileInputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                digest.update(buffer, 0, bytesRead);
+            }
+        }
+        byte[] hashedBytes = digest.digest();
+        return DatatypeConverter.printHexBinary(hashedBytes).toLowerCase();
+    }
+}
+
+
+// MainCTDProcess.java (Demonstration)
+import java.io.FileWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDate;
+
+public class MainCTDProcess {
+    public static void main(String[] args) {
+        CTDManager ctdManager = new CTDManager();
+
+        // 1. Create and add initial CTDs
+        ClinicalTrialDocument protocol = new ClinicalTrialDocument(
+            "TRIAL-001", null, DocumentType.PROTOCOL,
+            "01", "01.01", "01.01.01",
+            "Phase III Diabetes Study Protocol", "Dr. A. Smith",
+            "storage/TRIAL-001_Protocol_v1.0.pdf"
+        );
+        ctdManager.addDocument(protocol);
+
+        ClinicalTrialDocument icf = new ClinicalTrialDocument(
+            "TRIAL-001", "SITE-001", DocumentType.ICF,
+            "04", "04.01", "04.01.01",
+            "Site 001 Informed Consent Form", "Jane Doe",
+            "storage/TRIAL-001_SITE-001_ICF_v1.0.pdf"
+        );
+        ctdManager.addDocument(icf);
+
+        ClinicalTrialDocument crf = new ClinicalTrialDocument(
+            "TRIAL-001", "SITE-001", DocumentType.CRF,
+            "06", "06.01", "06.01.01", // Example TMF path for CRF
+            "CRF Page for Adverse Events", "Clinical Data Team",
+            "storage/TRIAL-001_CRF_AE.pdf"
+        );
+        ctdManager.addDocument(crf);
+
+        System.out.println("\n--- All Current Documents ---");
+        ctdManager.getAllDocuments().forEach(System.out::println);
+
+        // 2. Simulate document lifecycle changes
+        System.out.println("\n--- Simulating Lifecycle Changes ---");
+        ctdManager.updateDocumentStatus(protocol.getDocumentId(), DocumentStatus.PENDING_REVIEW);
+        ctdManager.updateDocumentStatus(protocol.getDocumentId(), DocumentStatus.APPROVED);
+        protocol.setApprovalDate(LocalDate.of(2025, 7, 30)); // Set approval date
+
+        // Simulate a new version of the ICF
+        try {
+            // Create a dummy file to generate a hash
+            Path dummyIcfPath = Paths.get("dummy_icf_v1.1.pdf");
+            Files.write(dummyIcfPath, "Content of ICF Version 1.1".getBytes());
+            String newIcfHash = ctdManager.calculateFileSha256(dummyIcfPath.toString());
+
+            ctdManager.updateDocumentVersion(
+                icf.getDocumentId(),
+                "1.1",
+                "storage/TRIAL-001_SITE-001_ICF_v1.1.pdf",
+                newIcfHash
+            );
+            Files.deleteIfExists(dummyIcfPath); // Clean up dummy file
+        } catch (Exception e) {
+            System.err.println("Error creating/hashing dummy file for ICF update: " + e.getMessage());
+        }
+
+
+        System.out.println("\n--- Documents After Updates ---");
+        ctdManager.getAllDocuments().forEach(System.out::println);
+
+        // 3. Retrieve documents by criteria
+        System.out.println("\n--- Protocols in the System ---");
+        ctdManager.getDocumentsByType(DocumentType.PROTOCOL).forEach(System.out::println);
+
+        System.out.println("\n--- Documents for TRIAL-001 ---");
+        ctdManager.getDocumentsByTrial("TRIAL-001").forEach(System.out::println);
+    }
+}
