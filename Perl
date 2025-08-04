@@ -1,0 +1,74 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use JSON;
+use Data::Dumper; # For pretty printing
+
+# This script simulates extracting metadata from a text-based "CTD log"
+# and converting it into a structured JSON format.
+
+my $ctd_log_data = q{
+# CTD Processing Log - 2024-07-30
+[DOC] Protocol_StudyX_v1.0.pdf | Type: Protocol | TrialID: S-123 | Author: J.Doe | Status: Approved | Date: 2024-01-01
+[DOC] ICF_Site001_P001_v1.0.docx | Type: ICF | TrialID: S-123 | SiteID: SITE-001 | Author: L.Smith | Status: Signed | Date: 2024-02-15
+[DOC] MonitoringReport_Q1_2024.pdf | Type: Monitoring Report | TrialID: S-123 | Author: M.Jones | Status: Final | Date: 2024-04-10
+[ERROR] File not found: MissingDoc.pdf
+[DOC] IB_DrugY_v2.0.pdf | Type: IB | TrialID: S-456 | Author: K.Brown | Status: Approved | Date: 2024-03-01
+};
+
+my @lines = split /\n/, $ctd_log_data;
+my @extracted_ctds;
+
+foreach my $line (@lines) {
+    next if $line =~ /^\s*#/;    # Skip comments
+    next unless $line =~ /\[DOC\]/; # Process only document entries
+
+    # Regex to extract key-value pairs
+    if ($line =~ /\[DOC\]\s*(.+?)\s*\|\s*Type:\s*(.+?)\s*\|\s*TrialID:\s*(.+?)(?:\s*\|\s*SiteID:\s*(.+?))?\s*\|\s*Author:\s*(.+?)\s*\|\s*Status:\s*(.+?)\s*\|\s*Date:\s*(.+)/) {
+        my ($filename, $doc_type, $trial_id, $site_id, $author, $status, $date) = ($1, $2, $3, $4, $5, $6, $7);
+
+        # Basic cleanup and default values
+        $filename =~ s/\.docx|\.pdf//g; # Remove common extensions for title
+        $site_id = $site_id ? $site_id : "N/A";
+
+        my %ctd_record = (
+            id           => "EXTRACT-" . int(rand(100000)), # Generate a mock ID
+            filename     => $filename,
+            documentType => $doc_type,
+            trialId      => $trial_id,
+            siteId       => $site_id,
+            author       => $author,
+            status       => $status,
+            date         => $date,
+            # Add conceptual TMF codes if you can map them based on doc_type
+            tmfZone      => "Unknown",
+            tmfArtifact  => "Unknown"
+        );
+
+        # Simple mapping for TMF classification (conceptual)
+        if ($doc_type eq 'Protocol') {
+            $ctd_record{tmfZone} = '1. Management';
+            $ctd_record{tmfArtifact} = 'Protocol (Main)';
+        } elsif ($doc_type eq 'ICF') {
+            $ctd_record{tmfZone} = '4. IRB/IEC';
+            $ctd_record{tmfArtifact} = 'Informed Consent Form';
+        } elsif ($doc_type eq 'Monitoring Report') {
+            $ctd_record{tmfZone} = '5. Investigator Site'; # Or 2. Central for central reports
+            $ctd_record{tmfArtifact} = 'Monitoring Visit Report';
+        } elsif ($doc_type eq 'IB') {
+            $ctd_record{tmfZone} = '3. Regulatory';
+            $ctd_record{tmfArtifact} = 'Investigator\'s Brochure';
+        }
+        
+        push @extracted_ctds, \%ctd_record;
+    } else {
+        warn "Could not parse line: $line\n";
+    }
+}
+
+print "--- Extracted CTD Metadata (JSON Format) ---\n";
+my $json_text = to_json(\@extracted_ctds, { pretty => 1 });
+print $json_text;
+
+# For inspection: print Dumper(\@extracted_ctds);
